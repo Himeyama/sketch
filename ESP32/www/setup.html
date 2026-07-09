@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>ESP32 セットアップ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600&display=swap">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  // font-sans を Noto Sans JP に差し替える。点字 (U+28xx) は Noto Sans JP に
+  // 入っていないので、スピナーは後ろの汎用フォントで描かれる
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['"Noto Sans JP"', "ui-sans-serif", "system-ui", "sans-serif"],
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root { color-scheme: light; }
+  * { -webkit-tap-highlight-color: transparent; }
+  button { touch-action: manipulation; }
+</style>
+</head>
+<body class="min-h-screen bg-slate-100 flex items-center justify-center p-4 antialiased font-sans text-[15px]">
+
+<main class="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
+  <div class="border-b border-slate-200 pb-4">
+    <h1 class="text-lg font-semibold text-slate-900">ESP32 セットアップ</h1>
+    <p class="mt-0.5 text-sm text-slate-500">Bluetooth Low Energy 経由で Wi-Fi を設定</p>
+  </div>
+
+  <div class="mt-4 space-y-2.5 rounded-md bg-slate-50 px-4 py-3 text-sm">
+    <div class="flex items-center justify-between gap-3">
+      <span class="shrink-0 text-slate-500">Bluetooth</span>
+      <span class="flex min-w-0 items-center gap-2 font-medium text-slate-700">
+        <span id="bleDot" class="h-2 w-2 shrink-0 rounded-full bg-slate-400"></span>
+        <span id="bleText" class="truncate">未接続</span>
+      </span>
+    </div>
+    <div class="flex items-center justify-between gap-3">
+      <span class="shrink-0 text-slate-500">Wi-Fi</span>
+      <span class="flex min-w-0 items-center gap-2 font-medium text-slate-700">
+        <span id="wifiDot" class="h-2 w-2 shrink-0 rounded-full bg-slate-400"></span>
+        <span id="wifiText" class="truncate">—</span>
+      </span>
+    </div>
+  </div>
+
+  <p id="message" class="mt-2 hidden text-sm"></p>
+
+  <button id="connect"
+    class="mt-4 w-full rounded-md bg-slate-900 py-2.5 text-sm font-medium text-white
+           transition hover:bg-slate-700 active:bg-slate-600
+           disabled:cursor-not-allowed disabled:bg-slate-400">
+    ESP32 に接続する
+  </button>
+  <button id="disconnect"
+    class="mt-4 hidden w-full rounded-md border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-700
+           transition hover:bg-slate-50 active:bg-slate-100">
+    切断する
+  </button>
+
+  <!-- ログイン -->
+  <section id="loginSection" class="mt-5 hidden border-t border-slate-200 pt-4">
+    <p class="mb-2 text-sm text-slate-500">ログイン</p>
+    <input id="adminPassword" type="password" autocomplete="current-password" placeholder="管理パスワード"
+      class="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900
+             placeholder:text-slate-400 focus:border-slate-400 focus:outline-none">
+    <button id="login"
+      class="mt-2 w-full rounded-md bg-slate-900 py-2.5 text-sm font-medium text-white
+             transition hover:bg-slate-700 active:bg-slate-600">
+      ログイン
+    </button>
+    <p id="loginError" class="mt-2 hidden text-sm text-rose-600">パスワードが違います</p>
+  </section>
+
+  <!-- Wi-Fi 設定 -->
+  <section id="wifiSection" class="mt-5 hidden border-t border-slate-200 pt-4">
+    <div class="mb-2 flex items-center justify-between">
+      <p class="text-sm text-slate-500">Wi-Fi 設定</p>
+      <button id="scan"
+        class="text-sm font-medium text-slate-700 underline underline-offset-2 hover:text-slate-900
+               disabled:cursor-not-allowed disabled:no-underline disabled:text-slate-400">
+        スキャン
+      </button>
+    </div>
+
+    <input id="ssid" autocomplete="off" placeholder="SSID"
+      class="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900
+             placeholder:text-slate-400 focus:border-slate-400 focus:outline-none">
+
+    <ul id="ssidList" class="mt-2 hidden divide-y divide-slate-200 overflow-hidden rounded-md border border-slate-200"></ul>
+
+    <input id="wifiPassword" type="password" autocomplete="off" placeholder="Wi-Fi パスワード"
+      class="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900
+             placeholder:text-slate-400 focus:border-slate-400 focus:outline-none">
+
+    <button id="save"
+      class="mt-2 w-full rounded-md bg-slate-900 py-2.5 text-sm font-medium text-white
+             transition hover:bg-slate-700 active:bg-slate-600">
+      保存して接続
+    </button>
+    <button id="toggleWifi" class="mt-2 hidden w-full rounded-md border border-slate-200 bg-white py-2.5
+             text-sm font-medium text-slate-700 transition hover:bg-slate-50 active:bg-slate-100
+             disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400">
+      Wi-Fi を切断
+    </button>
+    <button id="forget"
+      class="mt-2 w-full rounded-md border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-700
+             transition hover:bg-slate-50 active:bg-slate-100">
+      保存済みの設定を消す
+    </button>
+
+    <div id="wifiResult" class="mt-3 hidden rounded-md bg-slate-50 px-4 py-3 text-sm">
+      <p class="text-slate-500">接続先</p>
+      <p id="wifiSsid" class="font-medium text-slate-900"></p>
+      <a id="wifiLink" href="#" target="_blank" rel="noopener"
+        class="mt-1 inline-block font-medium text-slate-900 underline underline-offset-2"></a>
+    </div>
+
+    <details class="mt-4">
+      <summary class="cursor-pointer text-sm text-slate-500">管理パスワードを変更</summary>
+      <input id="newAdminPassword" type="password" autocomplete="new-password" placeholder="新しい管理パスワード"
+        class="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900
+               placeholder:text-slate-400 focus:border-slate-400 focus:outline-none">
+      <button id="changePassword"
+        class="mt-2 w-full rounded-md border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-700
+               transition hover:bg-slate-50 active:bg-slate-100">
+        変更する
+      </button>
+    </details>
+  </section>
+</main>
+
+<script>
+const SERVICE_UUID = "7d2ec300-4a9b-4d6e-9f31-08c7a5be1d40";
+const AUTH_CHARACTERISTIC_UUID = "7d2ec301-4a9b-4d6e-9f31-08c7a5be1d40";
+const SSID_CHARACTERISTIC_UUID = "7d2ec302-4a9b-4d6e-9f31-08c7a5be1d40";
+const PASSWORD_CHARACTERISTIC_UUID = "7d2ec303-4a9b-4d6e-9f31-08c7a5be1d40";
+const CONTROL_CHARACTERISTIC_UUID = "7d2ec304-4a9b-4d6e-9f31-08c7a5be1d40";
+const STATUS_CHARACTERISTIC_UUID = "7d2ec305-4a9b-4d6e-9f31-08c7a5be1d40";
+const SCAN_CHARACTERISTIC_UUID = "7d2ec306-4a9b-4d6e-9f31-08c7a5be1d40";
+
+const DOT_COLORS = {
+  idle: "bg-slate-400",
+  busy: "bg-amber-400 animate-pulse",
+  ok: "bg-emerald-400",
+  error: "bg-rose-500",
+};
+
+const WIFI_STATES = {
+  idle: { label: "未接続", dot: "idle" },
+  scanning: { label: "スキャン中...", dot: "busy", spin: true },
+  connecting: { label: "接続中...", dot: "busy", spin: true },
+  connected: { label: "接続済み", dot: "ok" },
+  failed: { label: "接続に失敗しました", dot: "error" },
+};
+
+const $ = (id) => document.getElementById(id);
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+let bleDevice = null;
+let characteristics = {};
+let loginAttempted = false;
+let latestStatus = null;
+const statusListeners = new Set();
+
+const dotClass = (state) => `h-2 w-2 shrink-0 rounded-full ${DOT_COLORS[state]}`;
+
+// スピナーは行の文字を書き換え続けるので、別の表示に移る前に必ず止める
+function setLamp(row, text, state) {
+  stopSpinner(row);
+  $(`${row}Text`).textContent = text;
+  $(`${row}Dot`).className = dotClass(state);
+}
+
+const setBle = (text, state) => setLamp("ble", text, state);
+const setWifi = (text, state) => setLamp("wifi", text, state);
+
+const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const SPINNER_INTERVAL = 80;
+
+// row -> ラベル。二行が同時に回ることがあるので、コマ送りは 1 本のタイマーで
+// まとめて進める。行ごとにタイマーを持つと回転が揃わない。
+const spinners = new Map();
+let spinnerTimer = null;
+let spinnerFrame = 0;
+
+function tickSpinners() {
+  const frame = SPINNER_FRAMES[spinnerFrame];
+  spinnerFrame = (spinnerFrame + 1) % SPINNER_FRAMES.length;
+  spinners.forEach((label, row) => {
+    $(`${row}Text`).textContent = `${frame} ${label}`;
+  });
+}
+
+function spinLamp(row, label, state) {
+  $(`${row}Dot`).className = dotClass(state);
+  spinners.set(row, label);
+  if (spinnerTimer) return;
+
+  tickSpinners();
+  spinnerTimer = setInterval(tickSpinners, SPINNER_INTERVAL);
+}
+
+function stopSpinner(row) {
+  spinners.delete(row);
+  if (spinners.size === 0) {
+    clearInterval(spinnerTimer);
+    spinnerTimer = null;
+  }
+}
+
+function showMessage(text, tone) {
+  const message = $("message");
+  message.textContent = text;
+  message.className = `mt-2 text-sm ${tone === "error" ? "text-rose-600" : "text-slate-500"}`;
+}
+
+function clearMessage() {
+  $("message").className = "mt-2 hidden text-sm";
+}
+
+// Web Bluetooth は GATT 操作を 1 つずつしか受け付けない。通知を受けて読み出す
+// のと、ボタン操作の書き込みが重なると "GATT operation already in progress" に
+// なるので、すべての操作をこのチェーンに直列化する。
+let gattChain = Promise.resolve();
+function serialize(task) {
+  const run = gattChain.then(task, task);
+  gattChain = run.catch(() => {});
+  return run;
+}
+
+const writeText = (name, text) =>
+  serialize(() => characteristics[name].writeValue(encoder.encode(text)));
+
+const readText = (name) =>
+  serialize(() => characteristics[name].readValue()).then((view) => decoder.decode(view));
+
+async function connect() {
+  try {
+    clearMessage();
+    setBle("デバイスを選択してください...", "busy");
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }],
+    });
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+
+    spinLamp("ble", "接続中...", "busy");
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+
+    characteristics = {
+      auth: await service.getCharacteristic(AUTH_CHARACTERISTIC_UUID),
+      ssid: await service.getCharacteristic(SSID_CHARACTERISTIC_UUID),
+      password: await service.getCharacteristic(PASSWORD_CHARACTERISTIC_UUID),
+      control: await service.getCharacteristic(CONTROL_CHARACTERISTIC_UUID),
+      status: await service.getCharacteristic(STATUS_CHARACTERISTIC_UUID),
+      scan: await service.getCharacteristic(SCAN_CHARACTERISTIC_UUID),
+    };
+
+    // 通知の中身は MTU に切り詰められうるので、通知は「変わった」合図として
+    // 扱い、実際の値は読み出しで取る (long read なので全長が読める)。
+    characteristics.status.addEventListener("characteristicvaluechanged", refreshStatus);
+    await serialize(() => characteristics.status.startNotifications());
+
+    bleDevice = device;
+    showConnectButton(false);
+    setBle("接続済み", "ok");
+    await refreshStatus();
+  } catch (error) {
+    setBle("未接続", "error");
+    showMessage(`エラー: ${error.message}`, "error");
+  }
+}
+
+function disconnect() {
+  if (bleDevice && bleDevice.gatt.connected) {
+    bleDevice.gatt.disconnect();
+  }
+}
+
+// 接続と切断は排他なので、片方だけを出す
+function showConnectButton(show) {
+  $("connect").classList.toggle("hidden", !show);
+  $("disconnect").classList.toggle("hidden", show);
+}
+
+function onDisconnected() {
+  showConnectButton(true);
+  setBle("未接続", "idle");
+  // BLE が切れると ESP32 の状態は追えなくなる。最後の値を残すと嘘になるので伏せる
+  setWifi("—", "idle");
+  latestStatus = null;
+  clearMessage();
+  $("loginSection").classList.add("hidden");
+  $("wifiSection").classList.add("hidden");
+  $("wifiResult").classList.add("hidden");
+  $("loginError").classList.add("hidden");
+  $("ssidList").classList.add("hidden");
+  $("toggleWifi").classList.add("hidden");
+  characteristics = {};
+  bleDevice = null;
+  loginAttempted = false;
+}
+
+// ESP32 側の処理はすべて loop() で走るため、書き込み直後の値はまだ古い。
+// 状態の変化はこの通知で受け取り、待ち合わせが必要な操作は waitForStatus を使う。
+function waitForStatus(predicate, timeoutMilliseconds = 25000) {
+  if (latestStatus && predicate(latestStatus)) return Promise.resolve(latestStatus);
+
+  return new Promise((resolve, reject) => {
+    const finish = (fn, arg) => { clearTimeout(timer); statusListeners.delete(listener); fn(arg); };
+    const listener = (status) => { if (predicate(status)) finish(resolve, status); };
+    const timer = setTimeout(() => finish(reject, new Error("応答がありません")), timeoutMilliseconds);
+    statusListeners.add(listener);
+  });
+}
+
+const isOnline = (status) => status.wifi === "connected" || status.wifi === "connecting";
+
+// 接続済みなら真を返す。ip は接続時のみ埋まる
+function renderWifiLamp(status) {
+  const state = WIFI_STATES[status.wifi] ?? { label: status.wifi, dot: "idle" };
+  const connected = status.wifi === "connected" && status.ip;
+
+  if (state.spin) {
+    spinLamp("wifi", state.label, state.dot);
+  } else {
+    setWifi(connected ? `接続済み (${status.ip})` : state.label, state.dot);
+  }
+  return connected;
+}
+
+async function refreshStatus() {
+  let status;
+  try {
+    status = JSON.parse(await readText("status"));
+  } catch (error) {
+    return;
+  }
+  const previousWifi = latestStatus?.wifi;
+  latestStatus = status;
+
+  const connected = renderWifiLamp(status);
+
+  if (status.wifi !== previousWifi) {
+    if (status.wifi === "failed") {
+      showMessage("Wi-Fi に接続できませんでした。SSID とパスワードを確認してください", "error");
+    } else if (status.wifi === "connected") {
+      showMessage(`${status.savedSsid} に接続しました`, "ok");
+    } else {
+      clearMessage();
+    }
+  }
+
+  $("loginSection").classList.toggle("hidden", status.auth);
+  $("wifiSection").classList.toggle("hidden", !status.auth);
+  $("loginError").classList.toggle("hidden", status.auth || !loginAttempted);
+  if (status.auth) loginAttempted = false;
+
+  if (status.auth && status.savedSsid && !$("ssid").value) {
+    $("ssid").value = status.savedSsid;
+  }
+
+  $("wifiResult").classList.toggle("hidden", !connected);
+  if (connected) {
+    $("wifiSsid").textContent = `${status.savedSsid} (${status.rssi} dBm)`;
+    $("wifiLink").href = `http://${status.ip}/`;
+    $("wifiLink").textContent = `http://${status.ip}/ を開く`;
+  }
+
+  // scanning は元の状態に戻る一時的なものなので、その間はボタンを触らない
+  if (status.wifi !== "scanning") {
+    const toggle = $("toggleWifi");
+    toggle.classList.toggle("hidden", !isOnline(status) && !status.savedSsid);
+    toggle.textContent = isOnline(status) ? "Wi-Fi を切断" : "保存済みの設定で再接続";
+  }
+
+  [...statusListeners].forEach((listener) => listener(status));
+}
+
+// 照合は ESP32 の loop() で行われるため、書き込み直後に status を読むと
+// まだ結果が反映されていないことがある。判定は必ず通知側で受け取る。
+async function login() {
+  const password = $("adminPassword").value;
+  if (!password) return;
+
+  $("loginError").classList.add("hidden");
+  loginAttempted = true;
+  await writeText("auth", password);
+  $("adminPassword").value = "";
+}
+
+function ssidListItem(network) {
+  const detail = `${network.rssi} dBm${network.open ? " / オープン" : ""}`;
+
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className =
+    "flex w-full items-center justify-between gap-3 bg-white px-3 py-2.5 text-left text-sm " +
+    "transition hover:bg-slate-50 active:bg-slate-100";
+  button.innerHTML =
+    `<span class="truncate font-medium text-slate-900"></span>` +
+    `<span class="shrink-0 text-xs text-slate-500">${detail}</span>`;
+  button.firstChild.textContent = network.ssid;
+  button.addEventListener("click", () => {
+    $("ssid").value = network.ssid;
+    $("wifiPassword").focus();
+  });
+
+  const item = document.createElement("li");
+  item.append(button);
+  return item;
+}
+
+async function scan() {
+  clearMessage();
+  // 押した瞬間に回し始める。ESP32 からの scanning 通知を待つと一拍遅れる
+  spinLamp("wifi", WIFI_STATES.scanning.label, WIFI_STATES.scanning.dot);
+  $("scan").disabled = true;
+  try {
+    await writeText("control", "scan");
+    // scan 特性が書き換わるのはスキャン完了後。開始と完了の両方を見届けてから読む
+    await waitForStatus((status) => status.wifi === "scanning");
+    await waitForStatus((status) => status.wifi !== "scanning");
+  } finally {
+    $("scan").disabled = false;
+    // 応答が来ないまま抜けた場合、上で回し始めたスピナーが残ってしまう
+    stopSpinner("wifi");
+    if (latestStatus) renderWifiLamp(latestStatus);
+  }
+
+  const networks = JSON.parse(await readText("scan"));
+  $("ssidList").replaceChildren(...networks.map(ssidListItem));
+  $("ssidList").classList.toggle("hidden", networks.length === 0);
+
+  if (networks.length === 0) {
+    showMessage("アクセスポイントが見つかりません", "error");
+  } else {
+    showMessage(`${networks.length} 件見つかりました。選ぶと SSID 欄に入ります`, "ok");
+  }
+}
+
+async function save() {
+  const ssid = $("ssid").value.trim();
+  if (!ssid) return;
+
+  await writeText("ssid", ssid);
+  await writeText("password", $("wifiPassword").value);
+  await writeText("control", "connect");
+  $("wifiPassword").value = "";
+}
+
+// 再接続は ssid を書かずに connect を投げる。ESP32 は保存済みの認証情報を使う
+// (SSID 欄を送ると、空のパスワード欄まで保存されてしまう)
+async function toggleWifi() {
+  const online = isOnline(latestStatus);
+
+  clearMessage();
+  $("toggleWifi").disabled = true;
+  try {
+    await writeText("control", online ? "disconnect" : "connect");
+    // ESP32 は知らないコマンドを黙って捨てる。状態が変わるのを見届けないと、
+    // 書き込み済みファームウェアが古いときに無反応と区別がつかない
+    await waitForStatus((status) => isOnline(status) !== online, 10000).catch(() => {
+      throw new Error("ESP32 が応答しません。ファームウェアが古い可能性があります");
+    });
+  } finally {
+    $("toggleWifi").disabled = false;
+  }
+}
+
+async function forget() {
+  await writeText("control", "forget");
+  $("ssid").value = "";
+  $("wifiPassword").value = "";
+}
+
+async function changePassword() {
+  const password = $("newAdminPassword").value;
+  if (!password) return;
+
+  await writeText("control", `setpw:${password}`);
+  $("newAdminPassword").value = "";
+  showMessage("管理パスワードを変更しました", "ok");
+}
+
+function guard(handler) {
+  return async () => {
+    try {
+      await handler();
+    } catch (error) {
+      showMessage(`エラー: ${error.message}`, "error");
+    }
+  };
+}
+
+$("connect").addEventListener("click", connect);
+$("disconnect").addEventListener("click", disconnect);
+$("login").addEventListener("click", guard(login));
+$("scan").addEventListener("click", guard(scan));
+$("save").addEventListener("click", guard(save));
+$("toggleWifi").addEventListener("click", guard(toggleWifi));
+$("forget").addEventListener("click", guard(forget));
+$("changePassword").addEventListener("click", guard(changePassword));
+$("adminPassword").addEventListener("keydown", (event) => {
+  if (event.key === "Enter") guard(login)();
+});
+
+if (!navigator.bluetooth) {
+  setBle("非対応", "error");
+  showMessage("Web Bluetooth 非対応のブラウザです", "error");
+  $("connect").disabled = true;
+}
+</script>
+</body>
+</html>
