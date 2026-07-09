@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>LED Panel Control</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { color-scheme: light; }
+  * { -webkit-tap-highlight-color: transparent; }
+  button { touch-action: manipulation; }
+</style>
+</head>
+<body class="min-h-screen bg-slate-100 flex items-center justify-center p-4 antialiased font-sans text-[15px]">
+
+<main class="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
+  <div class="border-b border-slate-200 pb-4">
+    <h1 class="text-lg font-semibold text-slate-900">LED パネル コントローラー</h1>
+    <p class="mt-0.5 text-sm text-slate-500">Bluetooth Low Energy 接続 / 9ch</p>
+  </div>
+
+  <div class="mt-4 flex items-center justify-between rounded-md bg-slate-50 px-4 py-3 text-sm">
+    <span class="text-slate-500">ステータス</span>
+    <span class="flex items-center gap-2 font-medium text-slate-700">
+      <span id="statusDot" class="h-2 w-2 shrink-0 rounded-full bg-slate-400"></span>
+      <span id="statusText" class="truncate">未接続</span>
+    </span>
+  </div>
+
+  <button id="connect"
+    class="mt-4 w-full rounded-md bg-slate-900 py-2.5 text-sm font-medium text-white
+           transition hover:bg-slate-700 active:bg-slate-600">
+    接続する
+  </button>
+  <button id="disconnect" disabled
+    class="mt-2 w-full rounded-md border border-slate-200 bg-white py-2.5 text-sm font-medium text-slate-700
+           transition hover:bg-slate-50 active:bg-slate-100
+           disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500">
+    切断する
+  </button>
+
+  <div class="mt-5 border-t border-slate-200 pt-4">
+    <p class="mb-2 text-sm text-slate-500">モード</p>
+    <div class="grid grid-cols-2 gap-2">
+      <button data-mode="0" disabled
+        class="mode-btn rounded-md border border-slate-200 bg-slate-50 py-3 text-sm font-semibold text-slate-700 transition
+               disabled:cursor-not-allowed disabled:text-slate-500">
+        停止
+      </button>
+      <button data-mode="1" disabled
+        class="mode-btn rounded-md border border-slate-200 bg-slate-50 py-3 text-sm font-semibold text-slate-700 transition
+               disabled:cursor-not-allowed disabled:text-slate-500">
+        チェイス
+      </button>
+      <button data-mode="2" disabled
+        class="mode-btn rounded-md border border-slate-200 bg-slate-50 py-3 text-sm font-semibold text-slate-700 transition
+               disabled:cursor-not-allowed disabled:text-slate-500">
+        全点滅
+      </button>
+      <button data-mode="3" disabled
+        class="mode-btn rounded-md border border-slate-200 bg-slate-50 py-3 text-sm font-semibold text-slate-700 transition
+               disabled:cursor-not-allowed disabled:text-slate-500">
+        交互点滅
+      </button>
+      <button data-mode="4" disabled
+        class="mode-btn col-span-2 rounded-md border border-slate-200 bg-slate-50 py-3 text-sm font-semibold text-slate-700 transition
+               disabled:cursor-not-allowed disabled:text-slate-500">
+        全灯
+      </button>
+    </div>
+  </div>
+</main>
+
+<script>
+const SERVICE_UUID = "a2f3b100-2cde-4f36-9e2a-3b6a2e8f9c11";
+const MODE_CHARACTERISTIC_UUID = "a2f3b101-2cde-4f36-9e2a-3b6a2e8f9c11";
+
+let modeCharacteristic = null;
+let bleDevice = null;
+const statusText = document.getElementById("statusText");
+const statusDot = document.getElementById("statusDot");
+const connectButton = document.getElementById("connect");
+const disconnectButton = document.getElementById("disconnect");
+const modeButtons = Array.from(document.querySelectorAll(".mode-btn"));
+
+const DOT_COLORS = {
+  idle: "bg-slate-400",
+  busy: "bg-amber-400 animate-pulse",
+  ok: "bg-emerald-400",
+  error: "bg-rose-500",
+};
+
+function setStatus(text, state) {
+  statusText.textContent = text;
+  statusDot.className = `h-2 w-2 shrink-0 rounded-full ${DOT_COLORS[state]}`;
+}
+
+function setButtonsEnabled(enabled) {
+  modeButtons.forEach((btn) => { btn.disabled = !enabled; });
+}
+
+// hover / active も含めて一式で切り替える。片方だけ当てると
+// hover:bg-* が bg-slate-900 に勝って白背景に白文字になる。
+const ACTIVE_CLASSES = ["border-slate-900", "bg-slate-900", "text-white", "hover:bg-slate-800", "active:bg-slate-700"];
+const INACTIVE_CLASSES = ["border-slate-200", "bg-slate-50", "text-slate-700", "hover:bg-slate-100", "active:bg-slate-200"];
+
+function setActiveMode(mode) {
+  modeButtons.forEach((btn) => {
+    const isActive = btn.dataset.mode === String(mode);
+    btn.classList.remove(...(isActive ? INACTIVE_CLASSES : ACTIVE_CLASSES));
+    btn.classList.add(...(isActive ? ACTIVE_CLASSES : INACTIVE_CLASSES));
+  });
+}
+
+async function connect() {
+  try {
+    setStatus("デバイスを選択してください...", "busy");
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }],
+    });
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+
+    setStatus("接続中...", "busy");
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    modeCharacteristic = await service.getCharacteristic(MODE_CHARACTERISTIC_UUID);
+
+    bleDevice = device;
+    setStatus(`接続済み: ${device.name}`, "ok");
+    setButtonsEnabled(true);
+    disconnectButton.disabled = false;
+    setActiveMode(0);
+  } catch (error) {
+    setStatus(`エラー: ${error}`, "error");
+  }
+}
+
+function disconnect() {
+  if (bleDevice && bleDevice.gatt.connected) {
+    bleDevice.gatt.disconnect();
+  }
+}
+
+function onDisconnected() {
+  setStatus("切断されました", "idle");
+  setButtonsEnabled(false);
+  disconnectButton.disabled = true;
+  setActiveMode(-1);
+  modeCharacteristic = null;
+  bleDevice = null;
+}
+
+async function setMode(value) {
+  if (!modeCharacteristic) return;
+  try {
+    await modeCharacteristic.writeValue(new TextEncoder().encode(String(value)));
+    setActiveMode(value);
+  } catch (error) {
+    setStatus(`送信エラー: ${error}`, "error");
+  }
+}
+
+connectButton.addEventListener("click", connect);
+disconnectButton.addEventListener("click", disconnect);
+modeButtons.forEach((btn) => {
+  btn.addEventListener("click", () => setMode(btn.dataset.mode));
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ESP32 LED Control</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-100 flex items-center justify-center p-4 antialiased font-sans text-[15px]">
+
+<main class="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
+  <div class="border-b border-slate-200 pb-4">
+    <h1 class="text-lg font-semibold text-slate-900">ESP32 LED コントローラー</h1>
+    <p class="mt-0.5 text-sm text-slate-500">Bluetooth Low Energy 接続</p>
+  </div>
+
+  <div class="mt-4 flex items-center justify-between rounded-md bg-slate-50 px-4 py-3 text-sm">
+    <span class="text-slate-500">ステータス</span>
+    <span class="flex items-center gap-2 font-medium text-slate-700">
+      <span id="statusDot" class="h-2 w-2 shrink-0 rounded-full bg-slate-400"></span>
+      <span id="statusText" class="truncate">未接続</span>
+    </span>
+  </div>
+
+  <button id="connect"
+    class="mt-4 w-full rounded-md bg-slate-900 py-2.5 text-sm font-medium text-white
+           transition hover:bg-slate-700">
+    接続する
+  </button>
+
+  <div class="mt-3 grid grid-cols-2 gap-2">
+    <button id="on" disabled
+      class="rounded-md border border-emerald-200 bg-emerald-50 py-3 text-sm font-semibold text-emerald-700 transition
+             hover:bg-emerald-100
+             disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300">
+      ON
+    </button>
+    <button id="off" disabled
+      class="rounded-md border border-rose-200 bg-rose-50 py-3 text-sm font-semibold text-rose-700 transition
+             hover:bg-rose-100
+             disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300">
+      OFF
+    </button>
+  </div>
+</main>
+
+<script>
+const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const LED_CHARACTERISTIC_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+let ledCharacteristic = null;
+const statusText = document.getElementById("statusText");
+const statusDot = document.getElementById("statusDot");
+const onBtn = document.getElementById("on");
+const offBtn = document.getElementById("off");
+
+const DOT_COLORS = {
+  idle: "bg-slate-400",
+  busy: "bg-amber-400 animate-pulse",
+  ok: "bg-emerald-400",
+  error: "bg-rose-500",
+};
+
+function setStatus(text, state) {
+  statusText.textContent = text;
+  statusDot.className = `h-2 w-2 shrink-0 rounded-full ${DOT_COLORS[state]}`;
+}
+
+async function connect() {
+  try {
+    setStatus("デバイスを選択してください...", "busy");
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }],
+    });
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+
+    setStatus("接続中...", "busy");
+    const server = await device.gatt.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    ledCharacteristic = await service.getCharacteristic(LED_CHARACTERISTIC_UUID);
+
+    setStatus(`接続済み: ${device.name}`, "ok");
+    onBtn.disabled = false;
+    offBtn.disabled = false;
+  } catch (error) {
+    setStatus(`エラー: ${error}`, "error");
+  }
+}
+
+function onDisconnected() {
+  setStatus("切断されました", "idle");
+  onBtn.disabled = true;
+  offBtn.disabled = true;
+  ledCharacteristic = null;
+}
+
+async function setLed(value) {
+  if (!ledCharacteristic) return;
+  try {
+    await ledCharacteristic.writeValue(new TextEncoder().encode(value));
+  } catch (error) {
+    setStatus(`送信エラー: ${error}`, "error");
+  }
+}
+
+document.getElementById("connect").addEventListener("click", connect);
+onBtn.addEventListener("click", () => setLed("1"));
+offBtn.addEventListener("click", () => setLed("0"));
+</script>
+</body>
+</html>
